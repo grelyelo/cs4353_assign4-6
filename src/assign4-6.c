@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include <pcap.h> // libpcap
 #include <dnet.h> // libdnet
@@ -10,6 +11,25 @@
 #include "pcap_magic.h"
 #include "my_pkthdr.h"
 
+#define CONFIG_FILE_MAX_LINE 256
+
+struct addr orig_victim_ip_addr;
+struct addr orig_victim_eth_addr;
+int orig_victim_port; 
+
+struct addr orig_attacker_ip_addr;
+struct addr orig_attacker_eth_addr;
+int orig_attacker_port;
+
+struct addr replay_victim_ip_addr;
+struct addr replay_victim_eth_addr;
+int replay_victim_port; 
+
+struct addr replay_attacker_ip_addr;
+struct addr replay_attacker_eth_addr;
+int replay_attacker_port;
+
+char PCAP_FILENAME[CONFIG_FILE_MAX_LINE]; 
 
 void display_pcap_header(struct pcap_file_header * );
 void display_packet_header(struct my_pkthdr *);
@@ -17,11 +37,14 @@ void display_packet_header(struct my_pkthdr *);
 int read_pcap_header(int, struct pcap_file_header *);
 int read_packet_header(int, struct my_pkthdr * );
 int read_packet(int, char *, int); 
+int parse_config(int);
 
-int main(int argc, char ** argv) {
-    int fd;
+int main(int argc, char ** argv) 
+{
+    int pcap_fd;
+    int config_fd;
     int count;
-    char * fname;
+    char * pcap_fname, * config_fname;
     unsigned int first_sec; // First packet timestamp, seconds
     int first_usec; // First packet timestamp, microseconds. 
 
@@ -41,22 +64,47 @@ int main(int argc, char ** argv) {
     struct my_pkthdr pkthdr;
     char * packet; // Some memory which is <snaplen> in size to hold our frames. 
 
-    if (argc != 2) {
+    if (argc == 2) {
+        config_fname = argv[1];
+        if((config_fd = open(config_fname, O_RDONLY)) == -1) {
+            fprintf(stderr, "error while opening %s: %d\n", config_fname, errno);
+            return 1;
+        };
+        
+        if(parse_config(config_fd) != 0) {
+            fprintf(stderr, "error while parsing config %s\n", config_fname);
+            return 1;
+        }
+        return 0;
+    } else if (argc != 3) {
         printf("Usage: %s <pcap file>\n", argv[0]);
         return 1;
-    }
-    fname = argv[1];
-    if((fd = open(fname, O_RDONLY)) == -1) {
-        fprintf(stderr, "error while opening %s: %d\n", fname, errno);
+    } 
+    pcap_fname = argv[1];
+    config_fname = argv[2];
+    if((pcap_fd = open(pcap_fname, O_RDONLY)) == -1) {
+        fprintf(stderr, "error while opening %s: %d\n", pcap_fname, errno);
         return 1;
     };
-    if( read_pcap_header(fd, &pcap_header) != 0 ) {
-        close(fd);
+
+    if((config_fd = open(config_fname, O_RDONLY)) == -1) {
+        fprintf(stderr, "error while opening %s: %d\n", config_fname, errno);
+        return 1;
+    };
+    
+    if(parse_config(config_fd) != 0) {
+        fprintf(stderr, "error while parsing config %s\n", config_fname);
+        return 1;
+    }
+
+
+    if( read_pcap_header(pcap_fd, &pcap_header) != 0 ) {
+        close(pcap_fd);
         return 1;
     }
     if(pcap_header.magic != PCAP_MAGIC) {
         fprintf(stderr, "bad magic: %x", pcap_header.magic);
-        close(fd);
+        close(pcap_fd);
         return 1;
     }
     printf("PCAP_MAGIC\n"); /* magic file header */
@@ -74,7 +122,7 @@ int main(int argc, char ** argv) {
     }
 
     int i = 0;
-    while(read_packet_header(fd, &pkthdr) == 0) {
+    while(read_packet_header(pcap_fd, &pkthdr) == 0) {
         printf("Packet %d\n", i);
 
         if(i == 0) {
@@ -93,7 +141,7 @@ int main(int argc, char ** argv) {
         printf("Actual Packet Length = %u\n", pkthdr.len);
 
         // Read packet
-        read_packet(fd, packet, pkthdr.len);
+        read_packet(pcap_fd, packet, pkthdr.len);
         eth_header = (struct eth_hdr *) packet; // ethernet header comes first, parse it. 
         printf("Ethernet Header\n");
         addr_pack(&ad,ADDR_TYPE_ETH,ETH_ADDR_BITS,&(eth_header->eth_src),ETH_ADDR_LEN);
@@ -255,35 +303,93 @@ int main(int argc, char ** argv) {
         i++;
     }
     free(packet);
-    if(close(fd) != 0) {
-        fprintf(stderr, "error while closing %s: %d\n", fname, errno);
+    if(close(pcap_fd) != 0) {
+        fprintf(stderr, "error while closing %s: %d\n", pcap_fname, errno);
         return 1;
     }
     return 0;
 }
 
 
-int read_pcap_header(int fd, struct pcap_file_header * pcap_header) {
-    if((read(fd, pcap_header, sizeof(struct pcap_file_header)) != sizeof(struct pcap_file_header))) {
+int read_pcap_header(int fd, struct pcap_file_header * pcap_header)
+{
+    if((read(fd, pcap_header, sizeof(struct pcap_file_header)) != sizeof(struct pcap_file_header)))
         return 1;
-    }
-    if(pcap_header->magic != PCAP_MAGIC) {
+    if(pcap_header->magic != PCAP_MAGIC)
         return 2;
-    }
     return 0;
 }
 
 
-int read_packet_header(int fd, struct my_pkthdr * pkthdr) {
-    if((read(fd, pkthdr, sizeof(struct my_pkthdr)) != sizeof(struct my_pkthdr))) {
+int read_packet_header(int fd, struct my_pkthdr * pkthdr) 
+{
+    if((read(fd, pkthdr, sizeof(struct my_pkthdr)) != sizeof(struct my_pkthdr))) 
         return 1;
-    }
     return 0;
 }
 
-int read_packet(int fd, char * packet, int pkt_len) {
-    if((read(fd, packet, pkt_len) != pkt_len)) {
+int read_packet(int fd, char * packet, int pkt_len) 
+{
+    if((read(fd, packet, pkt_len) != pkt_len))
         return 1;
-    }  
     return 0;
+}
+
+
+int parse_config(int fd) 
+{ 
+	FILE * fp;
+    char line[256];
+    int d; 
+
+	if ( (fp = fdopen(fd, "r")) == NULL ) {
+		return 1;
+	}
+
+    if (fscanf(fp, "%s\n", PCAP_FILENAME) != 1 ) { 
+        return 1;
+    }
+    
+    // Original Victim
+    if (fscanf(fp, "%s\n", line) != 1) return 1; 
+    addr_pton(line, &orig_victim_ip_addr);
+
+    if (fscanf(fp, "%s\n", line) != 1) return 1; 
+    addr_pton(line, &orig_victim_eth_addr);
+
+    if (fscanf(fp, "%d\n", &d) != 1) return 1; 
+    orig_victim_port = d;
+
+    // Original Attacker
+    if (fscanf(fp, "%s\n", line) != 1) return 1; 
+    addr_pton(line, &orig_attacker_ip_addr);
+
+    if (fscanf(fp, "%s\n", line) != 1) return 1; 
+    addr_pton(line, &orig_attacker_eth_addr);
+
+    if (fscanf(fp, "%d\n", &d) != 1) return 1; 
+    orig_attacker_port = d;
+
+    // Replay victim
+    if (fscanf(fp, "%s\n", line) != 1) return 1; 
+    addr_pton(line, &replay_victim_ip_addr);
+
+    if (fscanf(fp, "%s\n", line) != 1) return 1; 
+    addr_pton(line, &replay_victim_eth_addr);
+
+    if (fscanf(fp, "%d\n", &d) != 1) return 1; 
+    replay_victim_port = d;
+
+    // Replay attacker
+    if (fscanf(fp, "%s\n", line) != 1) return 1; 
+    addr_pton(line, &replay_attacker_ip_addr);
+
+    if (fscanf(fp, "%s\n", line) != 1) return 1; 
+    addr_pton(line, &replay_attacker_eth_addr);
+
+    if (fscanf(fp, "%d\n", &d) != 1) return 1; 
+    replay_attacker_port = d;
+
+
+	return 0;
 }
