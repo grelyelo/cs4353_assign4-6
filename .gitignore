@@ -1,0 +1,7 @@
+*.o
+*.pcap
+*.log
+*.cfg
+proxy.c
+assign4-6
+
