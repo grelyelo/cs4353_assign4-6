@@ -1,7 +1,7 @@
 #include "common.h"
 #include "util.h"
-#include <dnet/eth.h>
-#include <dnet/ip.h>
+//#include <dnet/eth.h>
+//#include <dnet/ip.h>
 
 void send_packet(char * packet, eth_t * ethfd, int len) 
 { 
@@ -18,7 +18,7 @@ int replace_port(char * packet, u_int16_t orig, u_int16_t repl, direction_t dire
             tcp_header->th_sport = htons(repl);
         return 1;
     } else { 
-        if(ntohs(tcp_header->th_sport) == orig)
+        if(ntohs(tcp_header->th_dport) == orig)
             tcp_header->th_dport = htons(repl);
         return 1;
     }

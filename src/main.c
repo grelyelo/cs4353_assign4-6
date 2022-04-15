@@ -25,6 +25,8 @@ eth_t * ethfd;
 
 int main(int argc, char ** argv) 
 {
+	int send_enabled = 0;
+    struct addr ad;
     int pcap_fd;
     int config_fd;
     char * pcap_fname, * config_fname;
@@ -40,27 +42,12 @@ int main(int argc, char ** argv)
     struct ip_hdr * ip_header; 
 
     if (argc == 2) {
-        config_fname = argv[1];
-        if((config_fd = open(config_fname, O_RDONLY)) == -1) {
-            fprintf(stderr, "error while opening %s: %d\n", config_fname, errno);
-            return 1;
-        };
-        
-        if(parse_config(config_fd) != 0) {
-            fprintf(stderr, "error while parsing config %s\n", config_fname);
-            return 1;
-        }
-        return 0;
-    } else if (argc != 3) {
-        printf("Usage: %s <pcap file>\n", argv[0]);
-        return 1;
+		config_fname = argv[1];
+    } else if (argc == 3) {
+		if (strcmp(argv[1], "-s") == 0) 
+			send_enabled = 1;
+		config_fname = argv[2];
     } 
-    pcap_fname = argv[1];
-    config_fname = argv[2];
-    if((pcap_fd = open(pcap_fname, O_RDONLY)) == -1) {
-        fprintf(stderr, "error while opening %s: %d\n", pcap_fname, errno);
-        return 1;
-    };
 
     if((config_fd = open(config_fname, O_RDONLY)) == -1) {
         fprintf(stderr, "error while opening %s: %d\n", config_fname, errno);
@@ -71,12 +58,20 @@ int main(int argc, char ** argv)
         fprintf(stderr, "error while parsing config %s\n", config_fname);
         return 1;
     }
-   // Set timing mode
-    if ( strcmp(TIMING, DELAY_TIMING_STR) ) { 
+
+	pcap_fname = PCAP_FILENAME;
+    if((pcap_fd = open(pcap_fname, O_RDONLY)) == -1) {
+        fprintf(stderr, "error while opening %s: %d\n", pcap_fname, errno);
+        return 1;
+    };
+
+
+   	// Set timing mode
+    if ( strcmp(TIMING, DELAY_TIMING_STR) == 0 ) { 
         timing_mode = DELAY_TIMING;
-    } else if ( strcmp(TIMING, REACTIVE_TIMING_STR)) { 
+    } else if ( strcmp(TIMING, REACTIVE_TIMING_STR) == 0) { 
         timing_mode = REACTIVE_TIMING;
-    } else if (strcmp(TIMING, EXACT_TIMING_STR) ) { 
+    } else if (strcmp(TIMING, EXACT_TIMING_STR) == 0) { 
         timing_mode = EXACT_TIMING;
     } else { 
         timing_mode = CONTINUOUS_TIMING;
@@ -108,7 +103,7 @@ int main(int argc, char ** argv)
     // Open ethernet device for sending/recieving packets
     ethfd = eth_open(IFACE_NAME);
     if ( ethfd == NULL ) {
-        fprintf(stderr, "could not open interface %s\n", IFACE_NAME);
+		perror("eth_open error");
         return 1;
     }
 
@@ -171,14 +166,23 @@ int main(int argc, char ** argv)
         // Recompute checksum
         ip_checksum((void *)ip_header, ntohs(ip_header->ip_len));
 
+
+        // parse_packet(packet);
         // Send packet :)
-        send_packet(packet, ethfd, pkthdr.len);
+		// Check if src ip matches the new attacker IP, if it does, send it. 
+		if(send_enabled) { 
+			addr_pack(&ad, ADDR_TYPE_IP, IP_ADDR_BITS, &(ip_header->ip_src), IP_ADDR_LEN);
+			if( addr_cmp(&ad, &replay_attacker_ip_addr) == 0 ) {
+				send_packet(packet, ethfd, pkthdr.len);
+				switch(timing_mode) { 
+					case DELAY_TIMING:
+						nanosleep((const struct timespec[]){{0, 500000L}}, NULL);
+						break;
+				}
+			}
+		}
+	
         
-        switch(timing_mode) { 
-            case DELAY_TIMING:
-                nanosleep((const struct timespec[]){{0, DEFAULT_DELAY_NS}}, NULL);
-                break;
-        }
 
         i++;
     }

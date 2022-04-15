@@ -32,7 +32,7 @@ typedef enum {
 #define EXACT_TIMING 3
 
 
-#define DEFAULT_DELAY_NS 500000L
+#define DEFAULT_DELAY_NS 500000000L
 
 extern struct addr orig_victim_ip_addr;
 extern struct addr orig_victim_eth_addr;
