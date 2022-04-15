@@ -3,6 +3,28 @@
 #include <dnet/eth.h>
 #include <dnet/ip.h>
 
+void send_packet(char * packet, eth_t * ethfd, int len) 
+{ 
+    eth_send(ethfd,packet,len);
+}
+
+
+int replace_port(char * packet, u_int16_t orig, u_int16_t repl, direction_t direction) 
+{
+    struct tcp_hdr *tcp_header;
+    tcp_header = (struct tcp_hdr *) (packet + ETH_HDR_LEN + IP_HDR_LEN);
+    if(direction == SRC) {
+        if(ntohs(tcp_header->th_sport) == orig)
+            tcp_header->th_sport = htons(repl);
+        return 1;
+    } else { 
+        if(ntohs(tcp_header->th_sport) == orig)
+            tcp_header->th_dport = htons(repl);
+        return 1;
+    }
+    return 0;
+}
+
 int replace_ip(char * packet, struct addr * orig, struct addr * repl, direction_t direction) 
 {
         // direction: 
@@ -19,10 +41,14 @@ int replace_ip(char * packet, struct addr * orig, struct addr * repl, direction_
         else
             ip_addr = &(ip_header->ip_dst);
 
+        // read the address from packet into addr struct
         addr_pack(&ad,ADDR_TYPE_IP,IP_ADDR_BITS,ip_addr,IP_ADDR_LEN);
+
+        // compare address from packet to the specified original address to replace
         if(addr_cmp(&ad, orig) == 0) {
+            // if they match, replace it 
             memcpy( ip_addr, &repl->addr_ip, IP_ADDR_LEN);
-            ip_checksum((void *)ip_header, ntohs(ip_header->ip_len));
+            // ip_checksum((void *)ip_header, ntohs(ip_header->ip_len));
             return 1;
         }
         return 0;
@@ -314,6 +340,12 @@ int parse_config(int fd)
         return 1; 
     replay_attacker_port = d;
 
+    // Interface
+    if (fscanf(fp, "%s\n", IFACE_NAME) != 1) 
+        return 1; 
+    // Timing
+    if (fscanf(fp, "%s\n", TIMING) != 1)
+        return 1; 
 
-	return 0;
+    return 0;
 }

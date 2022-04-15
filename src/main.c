@@ -18,6 +18,10 @@ struct addr replay_attacker_eth_addr;
 int replay_attacker_port;
 
 char PCAP_FILENAME[CONFIG_FILE_MAX_LINE]; 
+char IFACE_NAME[CONFIG_FILE_MAX_LINE];
+char TIMING[CONFIG_FILE_MAX_LINE];
+
+eth_t * ethfd; 
 
 int main(int argc, char ** argv) 
 {
@@ -26,13 +30,14 @@ int main(int argc, char ** argv)
     char * pcap_fname, * config_fname;
     unsigned int first_sec; // First packet timestamp, seconds
     int first_usec; // First packet timestamp, microseconds. 
-
+    int timing_mode;
     unsigned int elapsed_sec; // Time delta from first packet, seconds
     int elapsed_usec;         // Time delta from first packet, microseconds. 
 
     struct pcap_file_header pcap_header;
     struct my_pkthdr pkthdr;
     char * packet; // Some memory which is <snaplen> in size to hold our frames. 
+    struct ip_hdr * ip_header; 
 
     if (argc == 2) {
         config_fname = argv[1];
@@ -66,7 +71,16 @@ int main(int argc, char ** argv)
         fprintf(stderr, "error while parsing config %s\n", config_fname);
         return 1;
     }
-
+   // Set timing mode
+    if ( strcmp(TIMING, DELAY_TIMING_STR) ) { 
+        timing_mode = DELAY_TIMING;
+    } else if ( strcmp(TIMING, REACTIVE_TIMING_STR)) { 
+        timing_mode = REACTIVE_TIMING;
+    } else if (strcmp(TIMING, EXACT_TIMING_STR) ) { 
+        timing_mode = EXACT_TIMING;
+    } else { 
+        timing_mode = CONTINUOUS_TIMING;
+    }
 
     if( read_pcap_header(pcap_fd, &pcap_header) != 0 ) {
         close(pcap_fd);
@@ -91,6 +105,15 @@ int main(int argc, char ** argv)
         return 1;
     }
 
+    // Open ethernet device for sending/recieving packets
+    ethfd = eth_open(IFACE_NAME);
+    if ( ethfd == NULL ) {
+        fprintf(stderr, "could not open interface %s\n", IFACE_NAME);
+        return 1;
+    }
+
+ 
+
     int i = 0;
     while(read_packet_header(pcap_fd, &pkthdr) == 0) {
         printf("Packet %d\n", i);
@@ -112,18 +135,21 @@ int main(int argc, char ** argv)
 
         // Read packet
         read_packet(pcap_fd, packet, pkthdr.len);
+        // Set ip header pointer to correct location. 
+        ip_header = (struct ip_hdr *) (packet + ETH_HDR_LEN);
+
         // Parse the packet
         parse_packet(packet);
         printf("Packet %d MODIFIED\n", i);
 
         // Eth replacement
         // attacker
-        // replace_eth(packet, &orig_attacker_eth_addr, &replay_attacker_eth_addr, SRC );
-        // replace_eth(packet, &orig_attacker_eth_addr, &replay_attacker_eth_addr, DST );
+        replace_eth(packet, &orig_attacker_eth_addr, &replay_attacker_eth_addr, SRC );
+        replace_eth(packet, &orig_attacker_eth_addr, &replay_attacker_eth_addr, DST );
 
-        // // victim
-        // replace_eth(packet, &orig_victim_eth_addr, &replay_victim_eth_addr, SRC );
-        // replace_eth(packet, &orig_victim_eth_addr, &replay_victim_eth_addr, DST );
+        // victim
+        replace_eth(packet, &orig_victim_eth_addr, &replay_victim_eth_addr, SRC );
+        replace_eth(packet, &orig_victim_eth_addr, &replay_victim_eth_addr, DST );
 
         // IP replacement
         // attacker
@@ -135,7 +161,24 @@ int main(int argc, char ** argv)
         replace_ip(packet, &orig_victim_ip_addr, &replay_victim_ip_addr, DST); 
 
 
-        parse_packet(packet);
+        // TCP replacement
+        replace_port(packet, orig_attacker_port, replay_attacker_port, SRC );
+        replace_port(packet, orig_attacker_port, replay_attacker_port, DST );
+
+        replace_port(packet, orig_victim_port, replay_victim_port, SRC );
+        replace_port(packet, orig_victim_port, replay_victim_port, DST );
+
+        // Recompute checksum
+        ip_checksum((void *)ip_header, ntohs(ip_header->ip_len));
+
+        // Send packet :)
+        send_packet(packet, ethfd, pkthdr.len);
+        
+        switch(timing_mode) { 
+            case DELAY_TIMING:
+                nanosleep((const struct timespec[]){{0, DEFAULT_DELAY_NS}}, NULL);
+                break;
+        }
 
         i++;
     }

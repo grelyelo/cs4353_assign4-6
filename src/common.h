@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <pcap.h> // libpcap
 #include <dnet.h> // libdnet
@@ -20,6 +21,18 @@ typedef enum {
     DST
 } direction_t;
 
+#define DELAY_TIMING_STR "delay"
+#define REACTIVE_TIMING_STR "reactive"
+#define EXACT_TIMING_STR "exact"
+#define CONTINUOUS_TIMING_STR "continuous"
+
+#define CONTINUOUS_TIMING 0
+#define DELAY_TIMING 1
+#define REACTIVE_TIMING 2
+#define EXACT_TIMING 3
+
+
+#define DEFAULT_DELAY_NS 500000L
 
 extern struct addr orig_victim_ip_addr;
 extern struct addr orig_victim_eth_addr;
@@ -38,5 +51,7 @@ extern struct addr replay_attacker_eth_addr;
 extern int replay_attacker_port;
 
 extern char PCAP_FILENAME[CONFIG_FILE_MAX_LINE]; 
-
+extern char IFACE_NAME[CONFIG_FILE_MAX_LINE];
+extern char TIMING[CONFIG_FILE_MAX_LINE];
+extern eth_t * ethfd;
 #endif
