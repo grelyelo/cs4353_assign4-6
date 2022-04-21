@@ -3,6 +3,22 @@
 //#include <dnet/eth.h>
 //#include <dnet/ip.h>
 
+
+uint32_t get_ack(char * packet, int len) {
+	// To update the new global ack 
+	struct tcp_hdr * tcp_header; 
+	uint32_t ack;
+
+
+	tcp_header = (struct tcp_hdr *) (packet + ETH_HDR_LEN + IP_HDR_LEN); 
+	ack = ntohl(tcp_header->th_seq) + len;
+	return ack;
+}
+
+uint32_t get_ack_handshake(char * packet);
+
+uint32_t get_ack_discon(char * packet);
+
 void send_packet(char * packet, eth_t * ethfd, int len) 
 { 
     eth_send(ethfd,packet,len);
@@ -31,7 +47,8 @@ int replace_ip(char * packet, struct addr * orig, struct addr * repl, direction_
         // if SRC, replace src ip
         // if DST, replace dst ip
         struct ip_hdr *ip_header;
-        struct addr ad; 
+        
+		struct addr ad; 
         ip_addr_t * ip_addr; // pointer to location to write to 
         // Get the IP header...
         ip_header = (struct ip_hdr *) (packet + ETH_HDR_LEN);
@@ -115,7 +132,7 @@ void parse_packet(char * packet)
                     printf("\t\t\tdst_port = %d\n", ntohs(tcp_header->th_dport));
                     printf("\t\t\tseq = %u\n", ntohl(tcp_header->th_seq) );
                     printf("\t\t\tack = %u\n", ntohl(tcp_header->th_ack) );
-
+					printf("\t\t\tdata offset = %hhd\n", tcp_header->th_off);
                     break;
                 case IP_PROTO_UDP:
                     printf("\t\tUDP\n");

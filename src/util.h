@@ -19,4 +19,8 @@ int replace_port(char *, u_int16_t, u_int16_t, direction_t direction);
 
 int parse_config(int);
 
+uint32_t get_ack(char *, int); 
+uint32_t get_ack_handshake(char * packet);
+uint32_t get_ack_discon(char * packet);
+
 #endif

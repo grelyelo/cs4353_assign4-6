@@ -40,6 +40,7 @@ int main(int argc, char ** argv)
     struct my_pkthdr pkthdr;
     char * packet; // Some memory which is <snaplen> in size to hold our frames. 
     struct ip_hdr * ip_header; 
+	uint32_t ack; // holds ack number to put in the tcp header of packets we send. 
 
     if (argc == 2) {
 		config_fname = argv[1];
@@ -109,9 +110,8 @@ int main(int argc, char ** argv)
 
  
 
-    int i = 0;
+    int i = 1;
     while(read_packet_header(pcap_fd, &pkthdr) == 0) {
-        printf("Packet %d\n", i);
 
         if(i == 0) {
             first_sec = pkthdr.ts.tv_sec;
@@ -124,18 +124,31 @@ int main(int argc, char ** argv)
             elapsed_usec += 1000000;
         }
 
+
+        // Read packet
+        read_packet(pcap_fd, packet, pkthdr.len);
+
+		// Display packet metadata
+        printf("Packet %d\n", i);
         printf("%u.%06u\n", (unsigned)elapsed_sec, (unsigned)elapsed_usec);
         printf("Captured Packet Length = %u\n", pkthdr.caplen);
         printf("Actual Packet Length = %u\n", pkthdr.len);
 
-        // Read packet
-        read_packet(pcap_fd, packet, pkthdr.len);
+		// Display packet data
+		parse_packet(packet);
+        
+		// Modify the packet
+        printf("Packet %d MODIFIED\n", i);
+
         // Set ip header pointer to correct location. 
         ip_header = (struct ip_hdr *) (packet + ETH_HDR_LEN);
 
-        // Parse the packet
-        parse_packet(packet);
-        printf("Packet %d MODIFIED\n", i);
+		// check to see whether this packet is an attacker or a victim packet. 
+		// if victim, loop untli we get a packet then 
+			// update the ack number for next sent packet, continue
+			// otherwise, continue (do next iteration, read next packet, etc). 
+			// if no packet within a timeframe, report error, continue
+		// if attacker, replace fields, send packet (if enabled).  
 
         // Eth replacement
         // attacker
@@ -167,7 +180,8 @@ int main(int argc, char ** argv)
         ip_checksum((void *)ip_header, ntohs(ip_header->ip_len));
 
 
-        // parse_packet(packet);
+		// Display the modified packet
+        parse_packet(packet);
         // Send packet :)
 		// Check if src ip matches the new attacker IP, if it does, send it. 
 		if(send_enabled) { 
@@ -181,9 +195,6 @@ int main(int argc, char ** argv)
 				}
 			}
 		}
-	
-        
-
         i++;
     }
     free(packet);

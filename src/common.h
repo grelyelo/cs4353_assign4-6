@@ -54,4 +54,6 @@ extern char PCAP_FILENAME[CONFIG_FILE_MAX_LINE];
 extern char IFACE_NAME[CONFIG_FILE_MAX_LINE];
 extern char TIMING[CONFIG_FILE_MAX_LINE];
 extern eth_t * ethfd;
+
+extern 
 #endif
