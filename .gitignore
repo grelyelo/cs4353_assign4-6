@@ -1,3 +1,5 @@
+proxy*
+cph550*
 *.o
 *.pcap
 *.log
