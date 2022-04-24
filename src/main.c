@@ -20,8 +20,10 @@ int replay_attacker_port;
 char PCAP_FILENAME[CONFIG_FILE_MAX_LINE]; 
 char IFACE_NAME[CONFIG_FILE_MAX_LINE];
 char TIMING[CONFIG_FILE_MAX_LINE];
+char ERRBUF[PCAP_ERRBUF_SIZE];
 
 eth_t * ethfd; 
+pcap_t * pcap_dev_fd;
 
 int main(int argc, char ** argv) 
 {
@@ -38,7 +40,7 @@ int main(int argc, char ** argv)
 
     struct pcap_file_header pcap_header;
     struct my_pkthdr pkthdr;
-    char * packet; // Some memory which is <snaplen> in size to hold our frames. 
+    unsigned char * packet; // Some memory which is <snaplen> in size to hold our frames. 
     struct ip_hdr * ip_header; 
 	uint32_t ack; // holds ack number to put in the tcp header of packets we send. 
 
@@ -101,14 +103,20 @@ int main(int argc, char ** argv)
         return 1;
     }
 
-    // Open ethernet device for sending/recieving packets
+	// Open devices
+    // 1. Open ethernet device for sending packets
     ethfd = eth_open(IFACE_NAME);
     if ( ethfd == NULL ) {
 		perror("eth_open error");
         return 1;
     }
 
- 
+	// Open packet capture device (non-promisc mode) using same ethernet device as before
+	pcap_dev_fd = pcap_open_live(IFACE_NAME, 65535, 0, DEFAULT_RECV_TIMEOUT, ERRBUF);
+	if ( pcap_dev_fd == NULL ) {
+		fprintf(stderr, "pcap_open_live error: %s", ERRBUF);
+        return 1;
+	}
 
     int i = 1;
     while(read_packet_header(pcap_fd, &pkthdr) == 0) {
@@ -140,8 +148,6 @@ int main(int argc, char ** argv)
 		// Modify the packet
         printf("Packet %d MODIFIED\n", i);
 
-        // Set ip header pointer to correct location. 
-        ip_header = (struct ip_hdr *) (packet + ETH_HDR_LEN);
 
 		// check to see whether this packet is an attacker or a victim packet. 
 		// if victim, loop untli we get a packet then 
@@ -150,48 +156,35 @@ int main(int argc, char ** argv)
 			// if no packet within a timeframe, report error, continue
 		// if attacker, replace fields, send packet (if enabled).  
 
-        // Eth replacement
-        // attacker
-        replace_eth(packet, &orig_attacker_eth_addr, &replay_attacker_eth_addr, SRC );
-        replace_eth(packet, &orig_attacker_eth_addr, &replay_attacker_eth_addr, DST );
-
-        // victim
-        replace_eth(packet, &orig_victim_eth_addr, &replay_victim_eth_addr, SRC );
-        replace_eth(packet, &orig_victim_eth_addr, &replay_victim_eth_addr, DST );
-
-        // IP replacement
-        // attacker
-        replace_ip(packet, &orig_attacker_ip_addr, &replay_attacker_ip_addr, SRC); 
-        replace_ip(packet, &orig_attacker_ip_addr, &replay_attacker_ip_addr, DST); 
-
-        // victim
-        replace_ip(packet, &orig_victim_ip_addr, &replay_victim_ip_addr, SRC); 
-        replace_ip(packet, &orig_victim_ip_addr, &replay_victim_ip_addr, DST); 
-
-
-        // TCP replacement
-        replace_port(packet, orig_attacker_port, replay_attacker_port, SRC );
-        replace_port(packet, orig_attacker_port, replay_attacker_port, DST );
-
-        replace_port(packet, orig_victim_port, replay_victim_port, SRC );
-        replace_port(packet, orig_victim_port, replay_victim_port, DST );
-
-        // Recompute checksum
-        ip_checksum((void *)ip_header, ntohs(ip_header->ip_len));
 
 
 		// Display the modified packet
-        parse_packet(packet);
-        // Send packet :)
 		// Check if src ip matches the new attacker IP, if it does, send it. 
 		if(send_enabled) { 
 			addr_pack(&ad, ADDR_TYPE_IP, IP_ADDR_BITS, &(ip_header->ip_src), IP_ADDR_LEN);
-			if( addr_cmp(&ad, &replay_attacker_ip_addr) == 0 ) {
-				send_packet(packet, ethfd, pkthdr.len);
+			if( addr_cmp(&ad, &orig_attacker_ip_addr) == 0 ) {
+				// Replace values + recompute checksum on packet. 
+				do_replacement(packet, ack);
+				// Show the values from the modified packet. 
+				parse_packet(packet);
+				// Going to send the packet now
+				eth_send(ethfd, packet, pkthdr.len);
 				switch(timing_mode) { 
 					case DELAY_TIMING:
 						nanosleep((const struct timespec[]){{0, 500000L}}, NULL);
 						break;
+				}
+			} else { 
+				// get a packet from the victim 
+				const unsigned char * recv_packet = pcap_next(pcap_dev_fd, (struct pcap_pkthdr *) &pkthdr);
+				// set our ack number to the sequence number from the victim packet
+				if (recv_packet != NULL) {
+					// if syn/ack flags set, set ack # to sequence number + 1
+					
+					// otherwise, update ack by len of recieved packet. 
+				
+				} else { // couldn't get a packet, so use the packet from the capture instead of the recieved packet. 
+
 				}
 			}
 		}

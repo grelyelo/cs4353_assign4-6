@@ -4,7 +4,8 @@
 //#include <dnet/ip.h>
 
 
-uint32_t get_ack(char * packet, int len) {
+uint32_t get_ack(const unsigned char * packet, int len) 
+{
 	// To update the new global ack 
 	struct tcp_hdr * tcp_header; 
 	uint32_t ack;
@@ -15,9 +16,43 @@ uint32_t get_ack(char * packet, int len) {
 	return ack;
 }
 
-uint32_t get_ack_handshake(char * packet);
+void do_replacement(unsigned char * packet, uint32_t ack) 
+{
+	// Set ip header and tcp header pointers to correct location. 
+	struct ip_hdr * ip_header = (struct ip_hdr *) (packet + ETH_HDR_LEN);
+	struct tcp_hdr * tcp_header = (struct tcp_hdr *) (packet + ETH_HDR_LEN + IP_HDR_LEN);
 
-uint32_t get_ack_discon(char * packet);
+	// Eth replacement
+	// attacker
+	replace_eth(packet, &orig_attacker_eth_addr, &replay_attacker_eth_addr, SRC );
+	replace_eth(packet, &orig_attacker_eth_addr, &replay_attacker_eth_addr, DST );
+
+	// victim
+	replace_eth(packet, &orig_victim_eth_addr, &replay_victim_eth_addr, SRC );
+	replace_eth(packet, &orig_victim_eth_addr, &replay_victim_eth_addr, DST );
+
+	// IP replacement
+	// attacker
+	replace_ip(packet, &orig_attacker_ip_addr, &replay_attacker_ip_addr, SRC); 
+	replace_ip(packet, &orig_attacker_ip_addr, &replay_attacker_ip_addr, DST); 
+
+	// victim
+	replace_ip(packet, &orig_victim_ip_addr, &replay_victim_ip_addr, SRC); 
+	replace_ip(packet, &orig_victim_ip_addr, &replay_victim_ip_addr, DST); 
+
+	// TCP replacement
+	replace_port(packet, orig_attacker_port, replay_attacker_port, SRC );
+	replace_port(packet, orig_attacker_port, replay_attacker_port, DST );
+
+	replace_port(packet, orig_victim_port, replay_victim_port, SRC );
+	replace_port(packet, orig_victim_port, replay_victim_port, DST );
+
+	// Set ack number to correct value
+	tcp_header->th_ack = htonl(ack);	
+
+	// Recompute checksum
+	ip_checksum((void *)ip_header, ntohs(ip_header->ip_len));
+}
 
 void send_packet(char * packet, eth_t * ethfd, int len) 
 { 
@@ -72,7 +107,7 @@ int replace_ip(char * packet, struct addr * orig, struct addr * repl, direction_
 }
 
 
-int replace_eth(char * packet, struct addr * orig, struct addr * repl, direction_t direction) 
+int replace_eth(unsigned char * packet, struct addr * orig, struct addr * repl, direction_t direction) 
 {
         // direction: 
         // if SRC, replace src ip
@@ -97,7 +132,7 @@ int replace_eth(char * packet, struct addr * orig, struct addr * repl, direction
 }
 
 
-void parse_packet(char * packet) 
+void parse_packet(unsigned char * packet) 
 { 
     struct addr ad;
     struct eth_hdr *eth_header;
@@ -285,7 +320,7 @@ int read_packet_header(int fd, struct my_pkthdr * pkthdr)
     return 0;
 }
 
-int read_packet(int fd, char * packet, int pkt_len) 
+int read_packet(int fd, unsigned char * packet, int pkt_len) 
 {
     if((read(fd, packet, pkt_len) != pkt_len))
         return 1;

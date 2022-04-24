@@ -31,7 +31,7 @@ typedef enum {
 #define REACTIVE_TIMING 2
 #define EXACT_TIMING 3
 
-
+#define DEFAULT_RECV_TIMEOUT 1000
 #define DEFAULT_DELAY_NS 500000000L
 
 extern struct addr orig_victim_ip_addr;
@@ -53,7 +53,10 @@ extern int replay_attacker_port;
 extern char PCAP_FILENAME[CONFIG_FILE_MAX_LINE]; 
 extern char IFACE_NAME[CONFIG_FILE_MAX_LINE];
 extern char TIMING[CONFIG_FILE_MAX_LINE];
-extern eth_t * ethfd;
+extern char ERRBUF[PCAP_ERRBUF_SIZE];
 
-extern 
+extern eth_t * ethfd;
+extern pcap_t * pcap_dev_fd;
+
+
 #endif

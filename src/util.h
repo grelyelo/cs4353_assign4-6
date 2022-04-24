@@ -10,17 +10,17 @@ void display_packet_header(struct my_pkthdr *);
 
 int read_pcap_header(int, struct pcap_file_header *);
 int read_packet_header(int, struct my_pkthdr * );
-int read_packet(int, char *, int); 
-void parse_packet(char *);
+int read_packet(int, unsigned char*, int); 
+void parse_packet(unsigned char*);
 
-int replace_ip(char *, struct addr *, struct addr *, direction_t);
-int replace_eth(char *, struct addr *, struct addr *, direction_t);
-int replace_port(char *, u_int16_t, u_int16_t, direction_t direction);
+int replace_ip(unsigned char*, struct addr *, struct addr *, direction_t);
+int replace_eth(unsigned char*, struct addr *, struct addr *, direction_t);
+int replace_port(unsigned char*, u_int16_t, u_int16_t, direction_t direction);
+
+void do_replacement(unsigned char*, uint32_t ack);
 
 int parse_config(int);
 
-uint32_t get_ack(char *, int); 
-uint32_t get_ack_handshake(char * packet);
-uint32_t get_ack_discon(char * packet);
+uint32_t get_ack(const unsigned char*, int); 
 
 #endif
