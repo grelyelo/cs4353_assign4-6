@@ -4,17 +4,17 @@
 //#include <dnet/ip.h>
 
 
-uint32_t get_ack(const unsigned char * packet, int len) 
-{
-	// To update the new global ack 
-	struct tcp_hdr * tcp_header; 
-	uint32_t ack;
+// uint32_t get_ack(const unsigned char * packet, int len) 
+// {
+// 	// To update the new global ack 
+// 	struct tcp_hdr * tcp_header; 
+// 	uint32_t ack;
 
 
-	tcp_header = (struct tcp_hdr *) (packet + ETH_HDR_LEN + IP_HDR_LEN); 
-	ack = ntohl(tcp_header->th_seq) + len;
-	return ack;
-}
+// 	tcp_header = (struct tcp_hdr *) (packet + ETH_HDR_LEN + IP_HDR_LEN); 
+// 	ack = ntohl(tcp_header->th_seq) + len;
+// 	return ack;
+// }
 
 void do_replacement(unsigned char * packet, uint32_t ack) 
 {
@@ -60,7 +60,7 @@ void send_packet(char * packet, eth_t * ethfd, int len)
 }
 
 
-int replace_port(char * packet, u_int16_t orig, u_int16_t repl, direction_t direction) 
+int replace_port(unsigned char * packet, u_int16_t orig, u_int16_t repl, direction_t direction) 
 {
     struct tcp_hdr *tcp_header;
     tcp_header = (struct tcp_hdr *) (packet + ETH_HDR_LEN + IP_HDR_LEN);
@@ -76,7 +76,7 @@ int replace_port(char * packet, u_int16_t orig, u_int16_t repl, direction_t dire
     return 0;
 }
 
-int replace_ip(char * packet, struct addr * orig, struct addr * repl, direction_t direction) 
+int replace_ip(unsigned char * packet, struct addr * orig, struct addr * repl, direction_t direction) 
 {
         // direction: 
         // if SRC, replace src ip
@@ -132,7 +132,7 @@ int replace_eth(unsigned char * packet, struct addr * orig, struct addr * repl, 
 }
 
 
-void parse_packet(unsigned char * packet) 
+void parse_packet(const unsigned char * packet) 
 { 
     struct addr ad;
     struct eth_hdr *eth_header;

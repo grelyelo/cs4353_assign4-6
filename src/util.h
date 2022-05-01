@@ -11,7 +11,7 @@ void display_packet_header(struct my_pkthdr *);
 int read_pcap_header(int, struct pcap_file_header *);
 int read_packet_header(int, struct my_pkthdr * );
 int read_packet(int, unsigned char*, int); 
-void parse_packet(unsigned char*);
+void parse_packet(const unsigned char*);
 
 int replace_ip(unsigned char*, struct addr *, struct addr *, direction_t);
 int replace_eth(unsigned char*, struct addr *, struct addr *, direction_t);

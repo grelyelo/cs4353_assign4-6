@@ -42,6 +42,7 @@ int main(int argc, char ** argv)
     struct my_pkthdr pkthdr;
     unsigned char * packet; // Some memory which is <snaplen> in size to hold our frames. 
     struct ip_hdr * ip_header; 
+    struct tcp_hdr * tcp_header; 
 	uint32_t ack; // holds ack number to put in the tcp header of packets we send. 
 
     if (argc == 2) {
@@ -89,14 +90,14 @@ int main(int argc, char ** argv)
         close(pcap_fd);
         return 1;
     }
-    printf("PCAP_MAGIC\n"); /* magic file header */
-    printf("Version major number = %d\n", pcap_header.version_major); /* major number */
-    printf("Version minor number = %d\n", pcap_header.version_minor); /* minor number */
-    printf("GMT to local correction = %d\n", pcap_header.thiszone); /* gmt to local correction */
-    printf("Timestamp accuracy = %d\n", pcap_header.sigfigs);
-    printf("Snaplen = %d\n", pcap_header.snaplen); 
-    printf("Linktype = %d\n", pcap_header.linktype);
-    printf("\n");
+    // printf("PCAP_MAGIC\n"); /* magic file header */
+    // printf("Version major number = %d\n", pcap_header.version_major); /* major number */
+    // printf("Version minor number = %d\n", pcap_header.version_minor); /* minor number */
+    // printf("GMT to local correction = %d\n", pcap_header.thiszone); /* gmt to local correction */
+    // printf("Timestamp accuracy = %d\n", pcap_header.sigfigs);
+    // printf("Snaplen = %d\n", pcap_header.snaplen); 
+    // printf("Linktype = %d\n", pcap_header.linktype);
+    // printf("\n");
 
     if((packet = malloc(pcap_header.snaplen)) == NULL) {
         fprintf(stderr, "could not allocate memory for frames\n");
@@ -111,7 +112,7 @@ int main(int argc, char ** argv)
         return 1;
     }
 
-	// Open packet capture device (non-promisc mode) using same ethernet device as before
+	// 2. Open packet capture device (non-promisc mode) using same ethernet device as before
 	pcap_dev_fd = pcap_open_live(IFACE_NAME, 65535, 0, DEFAULT_RECV_TIMEOUT, ERRBUF);
 	if ( pcap_dev_fd == NULL ) {
 		fprintf(stderr, "pcap_open_live error: %s", ERRBUF);
@@ -121,7 +122,8 @@ int main(int argc, char ** argv)
     int i = 1;
     while(read_packet_header(pcap_fd, &pkthdr) == 0) {
 
-        if(i == 0) {
+        // Calculate timestamp
+        if(i == 1) {
             first_sec = pkthdr.ts.tv_sec;
             first_usec = pkthdr.ts.tv_usec;
         }
@@ -132,43 +134,41 @@ int main(int argc, char ** argv)
             elapsed_usec += 1000000;
         }
 
-
-        // Read packet
+        // Read packet from pcap
         read_packet(pcap_fd, packet, pkthdr.len);
 
-		// Display packet metadata
-        printf("Packet %d\n", i);
-        printf("%u.%06u\n", (unsigned)elapsed_sec, (unsigned)elapsed_usec);
-        printf("Captured Packet Length = %u\n", pkthdr.caplen);
-        printf("Actual Packet Length = %u\n", pkthdr.len);
-
-		// Display packet data
-		parse_packet(packet);
+		// Display packet metadata & data
+        // printf("Packet %d\n", i);
+        // printf("%u.%06u\n", (unsigned)elapsed_sec, (unsigned)elapsed_usec);
+        // printf("Captured Packet Length = %u\n", pkthdr.caplen);
+        // printf("Actual Packet Length = %u\n", pkthdr.len);
+		// parse_packet(packet); // contents
         
 		// Modify the packet
-        printf("Packet %d MODIFIED\n", i);
+        // printf("Packet %d MODIFIED\n", i);
 
-
-		// check to see whether this packet is an attacker or a victim packet. 
-		// if victim, loop untli we get a packet then 
-			// update the ack number for next sent packet, continue
-			// otherwise, continue (do next iteration, read next packet, etc). 
-			// if no packet within a timeframe, report error, continue
-		// if attacker, replace fields, send packet (if enabled).  
-
-
+		/* 
+            check to see whether this packet is an attacker or a victim packet. 
+            if victim, wait until we get a packet then 
+                update the ack number for next sent packet, continue
+                otherwise, continue (do next iteration, read next packet, etc). 
+                if no packet within a timeframe, report error, continue
+            if attacker, replace fields, send packet (if enabled).  
+        */
 
 		// Display the modified packet
 		// Check if src ip matches the new attacker IP, if it does, send it. 
 		if(send_enabled) { 
+            ip_header = (struct ip_hdr *) (packet + ETH_HDR_LEN);
 			addr_pack(&ad, ADDR_TYPE_IP, IP_ADDR_BITS, &(ip_header->ip_src), IP_ADDR_LEN);
 			if( addr_cmp(&ad, &orig_attacker_ip_addr) == 0 ) {
-				// Replace values + recompute checksum on packet. 
-				do_replacement(packet, ack);
-				// Show the values from the modified packet. 
-				parse_packet(packet);
-				// Going to send the packet now
-				eth_send(ethfd, packet, pkthdr.len);
+                
+                tcp_header = (struct tcp_hdr *) (packet + ETH_HDR_LEN + IP_HDR_LEN);
+
+				do_replacement(packet, ack);            // Replace values + recompute checksum on packet. 
+                printf("Packet #%d\n",i);
+				parse_packet(packet);                   // Show the values from the modified packet. 
+				eth_send(ethfd, packet, pkthdr.len);    // send the packet 
 				switch(timing_mode) { 
 					case DELAY_TIMING:
 						nanosleep((const struct timespec[]){{0, 500000L}}, NULL);
@@ -177,15 +177,29 @@ int main(int argc, char ** argv)
 			} else { 
 				// get a packet from the victim 
 				const unsigned char * recv_packet = pcap_next(pcap_dev_fd, (struct pcap_pkthdr *) &pkthdr);
-				// set our ack number to the sequence number from the victim packet
+                ip_header = (struct ip_hdr *) (recv_packet + ETH_HDR_LEN);
+                addr_pack(&ad, ADDR_TYPE_IP, IP_ADDR_BITS, &(ip_header->ip_src), IP_ADDR_LEN);
+                while((recv_packet != NULL) && addr_cmp(&ad, &replay_victim_ip_addr) != 0) {
+                    const unsigned char * recv_packet = pcap_next(pcap_dev_fd, (struct pcap_pkthdr *) &pkthdr);                
+                    ip_header = (struct ip_hdr *) (recv_packet + ETH_HDR_LEN);
+                    addr_pack(&ad, ADDR_TYPE_IP, IP_ADDR_BITS, &(ip_header->ip_src), IP_ADDR_LEN);
+                }
 				if (recv_packet != NULL) {
-					// if syn/ack flags set, set ack # to sequence number + 1
-					
-					// otherwise, update ack by len of recieved packet. 
-				
+                    tcp_header = (struct tcp_hdr *) (recv_packet + ETH_HDR_LEN + IP_HDR_LEN);
+                    printf("Received Packet #%d\n",i);
+                    parse_packet(recv_packet);                   // Show the values from the modified packet. 
+                    if( tcp_header->th_flags == 0x12) {
+                        // if syn/ack flags set in recieved packet,
+                        // set ack # to recived packet's sequence number + 1
+                        ack = ntohl(tcp_header->th_seq) + 1; 
+                    } else { 
+                        // otherwise, update ack by len of recieved packet. 
+                        // ack_delta = total length of packet - length of ip header
+                        ack = ack + (ntohs(ip_header->ip_len) - IP_HDR_LEN - (tcp_header->th_off * 4));
+                    }				
 				} else { // couldn't get a packet, so use the packet from the capture instead of the recieved packet. 
 
-				}
+                }
 			}
 		}
         i++;
