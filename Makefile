@@ -8,4 +8,4 @@ main:
 	gcc -Wall -c src/main.c 
 
 clean:
-	rm assign4-6
+	rm assign4-6 *.o
