@@ -37,13 +37,16 @@ int main(int argc, char ** argv)
     int timing_mode;
     unsigned int elapsed_sec; // Time delta from first packet, seconds
     int elapsed_usec;         // Time delta from first packet, microseconds. 
+    int teardown = 0;
 
     struct pcap_file_header pcap_header;
     struct my_pkthdr pkthdr;
     unsigned char * packet; // Some memory which is <snaplen> in size to hold our frames. 
     struct ip_hdr * ip_header; 
     struct tcp_hdr * tcp_header; 
-	uint32_t ack; // holds ack number to put in the tcp header of packets we send. 
+	uint32_t init_ack; // holds ack number to put in the tcp header of packets we send. 
+    uint32_t ack;
+    uint32_t data_recvd; // amount of payload received from server
 
     if (argc == 2) {
 		config_fname = argv[1];
@@ -138,15 +141,11 @@ int main(int argc, char ** argv)
         read_packet(pcap_fd, packet, pkthdr.len);
 
 		// Display packet metadata & data
-        // printf("Packet %d\n", i);
-        // printf("%u.%06u\n", (unsigned)elapsed_sec, (unsigned)elapsed_usec);
-        // printf("Captured Packet Length = %u\n", pkthdr.caplen);
-        // printf("Actual Packet Length = %u\n", pkthdr.len);
-		// parse_packet(packet); // contents
-        
-		// Modify the packet
-        // printf("Packet %d MODIFIED\n", i);
-
+        printf("Packet %d\n", i);
+        printf("%u.%06u\n", (unsigned)elapsed_sec, (unsigned)elapsed_usec);
+        printf("Captured Packet Length = %u\n", pkthdr.caplen);
+        printf("Actual Packet Length = %u\n", pkthdr.len);
+ 
 		/* 
             check to see whether this packet is an attacker or a victim packet. 
             if victim, wait until we get a packet then 
@@ -186,24 +185,60 @@ int main(int argc, char ** argv)
                 }
 				if (recv_packet != NULL) {
                     tcp_header = (struct tcp_hdr *) (recv_packet + ETH_HDR_LEN + IP_HDR_LEN);
-                    printf("Received Packet #%d\n",i);
+                    printf("Packet #%d\n",i);
                     parse_packet(recv_packet);                   // Show the values from the modified packet. 
-                    if( tcp_header->th_flags == 0x12) {
-                        // if syn/ack flags set in recieved packet,
-                        // set ack # to recived packet's sequence number + 1
-                        ack = ntohl(tcp_header->th_seq) + 1; 
+                    if( (tcp_header->th_flags & (TH_ACK|TH_SYN)) == (TH_ACK|TH_SYN)) { // SYN/ACK
+                        data_recvd = 0;
+                        init_ack = ntohl(tcp_header->th_seq) + 1; // increment by 1 for ACK in 3way handshake
+                        ack = init_ack;
+                    } else if  ((tcp_header->th_flags & (TH_FIN))) { // break, close connection
+                        data_recvd += (ntohs(ip_header->ip_len) - IP_HDR_LEN - (tcp_header->th_off * 4));
+                        ack = init_ack + data_recvd;                        
+                        teardown = 1;
+                        i++;
+                        break;                        
                     } else { 
-                        // otherwise, update ack by len of recieved packet. 
-                        // ack_delta = total length of packet - length of ip header
-                        ack = ack + (ntohs(ip_header->ip_len) - IP_HDR_LEN - (tcp_header->th_off * 4));
+                        // Add length of packet data to our ack
+                        data_recvd += (ntohs(ip_header->ip_len) - IP_HDR_LEN - (tcp_header->th_off * 4));
+                        ack = init_ack + data_recvd;
                     }				
 				} else { // couldn't get a packet, so use the packet from the capture instead of the recieved packet. 
+                    ip_header = (struct ip_hdr *) (packet + ETH_HDR_LEN);
+                    tcp_header = (struct tcp_hdr *) (packet + ETH_HDR_LEN + IP_HDR_LEN);
 
+                    data_recvd += (ntohs(ip_header->ip_len) - IP_HDR_LEN - (tcp_header->th_off * 4));
+                    ack = init_ack + data_recvd;
                 }
 			}
 		}
         i++;
     }
+    // TEARDOWN CONNECTION, read packets until we get a FIN/ACK packet sent by the original attacker. 
+    while(teardown && read_packet_header(pcap_fd, &pkthdr) == 0 ) { 
+        elapsed_sec = pkthdr.ts.tv_sec - first_sec;
+        elapsed_usec = pkthdr.ts.tv_usec - first_usec;
+        while(elapsed_usec < 0) {
+            elapsed_sec--;
+            elapsed_usec += 1000000;
+        }
+        read_packet(pcap_fd, packet, pkthdr.len);
+        ip_header = (struct ip_hdr *) (packet + ETH_HDR_LEN);
+        tcp_header = (struct tcp_hdr *) (packet + ETH_HDR_LEN + IP_HDR_LEN);
+        addr_pack(&ad, ADDR_TYPE_IP, IP_ADDR_BITS, &(ip_header->ip_src), IP_ADDR_LEN);
+        if((addr_cmp(&ad, &orig_attacker_ip_addr) == 0) && 
+           (tcp_header->th_flags & (TH_FIN))) {
+            
+            printf("Packet %d\n", i);
+            printf("%u.%06u\n", (unsigned)elapsed_sec, (unsigned)elapsed_usec);
+            printf("Captured Packet Length = %u\n", pkthdr.caplen);
+            printf("Actual Packet Length = %u\n", pkthdr.len);
+            ack++;
+            do_replacement(packet, ack);            // Replace values + recompute checksum on packet. 
+            parse_packet(packet);                   // Show the values from the modified packet. 
+            eth_send(ethfd, packet, pkthdr.len);    // send the packet 
+        }
+    }
+    
     free(packet);
     if(close(pcap_fd) != 0) {
         fprintf(stderr, "error while closing %s: %d\n", pcap_fname, errno);
